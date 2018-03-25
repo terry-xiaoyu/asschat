@@ -42,11 +42,12 @@
   MQTT 里 ClientID 是终端的唯一标识，订阅也是基于 ClientID 的。但 MQTT 对于 ClientID 的命名规则没有定义。在 IM 应用里，我们关心的是 UserID。如果支持多终端登陆的话，一个 UserID 需要对应多个 ClientID。举例来说，用户 user1 有两个终端需要同时登陆， 我们需要分别为这两个终端分配不同的 ClientID："mobile:user1" 和 "pc:user1"，这几个终端不仅仅需要接收同样的消息，在其中一个发消息的时候，还需要同步到其他终端上去。这些过程应该由协议来规范。
 
 - **添加好友**  
-  IM 应用里，添加好友是非常常见的功能，非好友关系不能聊天。为了实现添加好友的功能，MQTT 里常见的做法有两个:  
-  - 用户 user1 接收消息需要订阅 "user/user1", user2 向 user1 发消息需要发布到 "user/user1"。默认的 ACL 规则禁止发布，当 user1 与 user2 添加好友后，开放 user2 发布到 "user/user1" 的 ACL 权限。 
-  - 用户默认不订阅任何主题。当 user1 与 user2 添加好友后，为 user1 和 user2 同时订阅 "conversation/<convs-id>"。双方通过 "conversation/<convs-id>" 来聊天。 
 
-  第二中方式相对优雅，好处是不必维护繁杂的 ACL 规则列表，并且将添加好友和创建群组的语义统一了起来，添加好友就是创建一个仅有两人的群组。但这种方式面临着跟群聊一样的问题：发消息的人会收到一条自己发来的消息。
+  IM 应用里，添加好友是非常常见的功能，非好友关系不能聊天。为了实现添加好友的功能，MQTT 里常见的做法有两个:  
+  - 用户 user1 接收消息需要订阅 "user/user1", user2 向 user1 发消息需要发布到 "user/user1"。默认的 ACL 规则禁止发布，当 user1 与 user2 添加好友后，开放 user2 发布到 "user/user1" 的 ACL 权限。 
+  - 用户默认不订阅任何主题。当 user1 与 user2 添加好友后，为 user1 和 user2 同时订阅 "conversation/<convs-id>"。双方通过 "conversation/<convs-id>" 来聊天。
+  
+  第二中方式相对优雅，好处是不必维护繁杂的 ACL 规则列表，并且将添加好友和创建群组的语义统一了起来，添加好友就是创建一个仅有两人的群组。但这种方式面临着跟群聊一样的问题：发消息的人会收到一条自己发来的消息。
 
 ### ASSChat Protocol 设计原则
 - 完全兼容 MQTT v5 基础协议，使用 MQTT 协议里定义的各种 `Control Packets`。
