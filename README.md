@@ -33,9 +33,7 @@
 
   考虑 `监听` 的场景：如果 IM 应用里，存在监听设备，用以监听某用户的聊天。这种情况下需要特殊设计一下发消息用的 MQTT 主题。比如，我们可以规定用户 user1 为接收消息订阅的主题是 "user/user1/#", 而 user2 给 user1 发消息时，需要发布到 "user/user1/user2"，注意我们将 user2 的用户名也加入到了发布主题里。这样监听设备就可以通过订阅 "user/+/user2" 监听 user2 发出来的消息，通过订阅 "user/user2" 来监听其他人发给 user2 的消息。
 
-  再来考虑 `截获` 的场景：假设一个 IM 应用里的所有消息都是严格收到管制的，包含某些敏感信息如 `公司机密` 需要限制用户发消息必须先发布到监听设备 "user/intercepter", 然后再由监听设备转发到 "user/user-id"。
-
-  可以看到使用 `发布/订阅` 模式做监听与截获并不直观。
+  可以看到使用 `发布/订阅` 模式做监听并不直观。
 
   上述场景里，`发布/订阅` 不太合适，我们需要另外一套机制来处理这些 IM 应用中常见的需求。
 
@@ -47,7 +45,7 @@
   IM 应用里，添加好友是非常常见的功能，非好友关系不能聊天。为了实现添加好友的功能，MQTT 里常见的做法有两个：
   - 用户 user1 接收消息需要订阅 "user/user1", user2 向 user1 发消息需要发布到 "user/user1"。默认的 ACL 规则禁止发布，当 user1 与 user2 添加好友后，开放 user2 发布到 "user/user1" 的 ACL 权限。
   - 用户默认不订阅任何主题。当 user1 与 user2 添加好友后，为 user1 和 user2 同时订阅 "conversation/<convs-id>"。双方通过 "conversation/<convs-id>" 来聊天。
-  
+
   第二中方式相对优雅，好处是不必维护繁杂的 ACL 规则列表，并且将添加好友和创建群组的语义统一了起来，添加好友就是创建一个仅有两人的群组。但这种方式面临着跟群聊一样的问题：发消息的人会收到一条自己发来的消息。
 
 ### ASSChat Protocol 设计原则
@@ -57,12 +55,12 @@
 
 ASSChat 基于 MQTT 协议 v5，意味着可以完全复用 MQTT 协议里的 连接建立过程和断开、以及连接保活过程。ASSChat 仍然可以使用 PUB/SUB 过程，但不作为聊天通道，仅做为实现 IM 应用里的辅助功能，比如检查用户是否在线等。
 
-### Channel
+### Channel 设计概要
 `Channel` 是 IM 用户聊天的通道，需要有建立、删除 Channel，发送消息到 Channel 等过程。
 
 ##### Channel 的定义：
 - Channel 由 `Channel ID (CHID)` 标识。
-- Channel 由多个 `Channel Endpoint (CHEP)` 组成，`Channel Endpoint` 可以是 `user` 或 其他 `Channel`。
+- Channel 由多个 `Channel Endpoint (EP)` 组成，`Channel Endpoint` 可以是 `user`、`client` 或 其他 `Channel`。但不能是当前的 Channel。
 - 一个 Channel 里至少包含两个 `Channel Endpoint`。
 - 当一个 `Channel Endpoint` 发来消息时，Channel 向所有除了它之外的 `Channel Endpoints` 推送这条消息。
 
@@ -71,19 +69,69 @@ ASSChat 基于 MQTT 协议 v5，意味着可以完全复用 MQTT 协议里的 �
 
 一个包含了 user5, ChID1, ChID2 的 Channel 可以表示为：ChID3 = [user5, ChID1, ChID2]。
 
+一个 Channel 不能包含它本身。比如 ChID4 = [user7, ChID4] 是非法的 Channel。
+
 ##### Channel 的推送方式：
 
 假设有三个 Channel：ChID1 = [user1, user2], ChID2 = [user3, user4], ChID3 = [user5, ChID1, ChID2].
 
 那么：
-- 如果 user1 向 ChID1 发了一条消息，消息会被推送给 user2。同样如果 user3 向 ChID2 发消息会被推送到 user4。但如果 user3 发消息给 ChID1 的话，会被 ChID1 拒绝。
+- 如果 user1 向 ChID1 发了一条消息，消息会被推送给 user2。同样如果 user3 向 ChID2 发消息会被推送到 user4。但如果 user3 向 ChID1 发消息会被 ChID1 拒绝。
 - 如果 user5 向 ChID3 发送消息会被推送到 ChID1 和 ChID2, 但 user1 发消息到 ChID1, 或者 user3 发消息到 ChID2 都无法把消息推送到 ChID3, 也就无法推送到 user5。
-- 若更改 ChID1 = [user1, user2, ChID3], ChID2 = [user3, user4, ChID3], 则三个 Channel **互通**。意思是 user5 发送的消息会经由 ChID1 推送给 user1、user2，经由 ChID2 推送给 user3、user4，反之亦然。
+- 若更改 ChID1 和 ChID2：ChID1 = [user1, user2, ChID3], ChID2 = [user3, user4, ChID3], 则三个 Channel **互通**。意思是 user5 发送的消息会经由 ChID1 推送给 user1、user2，并经由 ChID2 推送给 user3、user4，反之亦然。
 
 
-##### Channel Notifications
+##### Channel Endpoint Properties：
+一个 Channel 里的 EP 可以有如下属性：
+- EPID: Endpoint 的 ID, 可以是 UserID, ClientID 或者其他 Channel 的 CHID。
+- Mode: 可以是 read、write, 或者 read-write. 分别表示允许向 Channel 发消息、允许从 Channel 接收消息，或者两者都允许。
 
-##### ACL in Channel
+##### Channel Properties:
+一个 Channel 可以有如下属性：
+- EPs: Channel 里的 Endpoints，至少有两个。
+- MaxWriteSpeed: Channel 最大写速率。
+
+### Channel 消息类型
+
+##### Channel Msg
+Direction: Both `Broker -> Client` and `Client -> Broker`.  
+即时通信消息。
+
+##### Channel Cmd
+- Create/Delete Channel  
+  Direction: `Client -> Broker`. Client 发送创建/删除 Channel 请求给 Broker，Broker 可以选择直接为其创建/删除 Channel, 或者交由后台服务处理。无论是哪一种情况，Broker 都要回复一个 Channel Cmd ACK, ACK 里的 result code 表明 Broker 接受了创建/删除请求正在处理，或者 Broker 拒绝了该请求。
+
+- Add/Remove Endpoints  
+  Direction: `Client -> Broker`. Client 发送添加/删除 EP 请求给 Broker，Broker 可以选择直接处理, 或者交由后台服务处理。无论是哪一种情况，Broker 都要回复一个 Channel Cmd ACK, ACK 里的 result code 表明 Broker 接受了请求正在处理，或者 Broker 拒绝了此请求。
+
+- Channel Notification  
+  Direction: `Broker -> Client`. Broker 发送 Channel 改动通知给 Client，通知类型可以有如下几种：
+  - Channel Created: Channel 被创建。消息头里的 CHID 属性描述了创建的 ChannelID，OP 属性描述了创建动作的发起人。
+  - Channel Deleted: Channel 被删除。消息头里的 CHID 属性描述了删除的 ChannelID，OP 属性描述了创建动作的发起人。
+  - Channel Endpoints In: 新的 EP 被加入, 消息头里的 CHID 属性描述了 ChannelID，EP 属性描述了新加入的 Endpoints，OP 属性描述了添加 EP 动作的发起人。Broker 可以连续发多个 Channel Endpoints In 消息。
+  - Channel Endpoints Out: EP 被删除, 消息头里的 CHID 属性描述了 ChannelID，EP 属性描述了被移除的 Endpoints，OP 属性描述了移除 EP 动作的发起人。Broker 可以连续发多个 Channel Endpoints Out 消息。
+  - User Defined Notification：用户自定义的 Channel 通知，消息头里的 Type 属性描述了自定义通知的类型，CHID，EP，OP 等属性可选。消息体描述了通知的内容。
+
+  Client 收到 Channel Notification 后要回复一个 Channel Cmd ACK。
+
+##### Channel Cmd ACK
+Direction: Both `Broker -> Client` and `Client -> Broker`.
+
 
 ### 约定
+- ChannelID 命名规范：  
+  CHID 使用 `$` 开头，包含字母、数字、下划线、短线，最大长度 32： `^\$[0-9a-zA-Z_\-]{1,31}$`.  
+  举例：$ch1, $ch-1, $342
 
+- UserID 命名规范：  
+  包含字母、数字、下划线、短线、`@`、点。最大长度 32：`^[0-9a-zA-Z_\-@\.]{1,32}$`.  
+  举例：Scarlett, 98712, Shawn_123
+
+- ClientID 命名规范：
+  ClientID 是以冒号分割的字符串, 并且分割的第一段被认为是 UserID。  
+  ClientID 包含字母、数字、下划线、短线、冒号、`@`、点，且冒号不能作为开始和结尾字符。最大长度 32：`^(?!:)(?!.*?:$)[0-9a-zA-Z_\-@\.:]{1,32}$`.  
+  举例：9761:mobile, Shawn@app1:pc, app2-7843:pc:1  
+  上面的例子里，UserID 分别为 9761, Shawn@app1 和 app2-7843。
+
+- Channel Endpoint 约定：
+  如果一个用户 `user1` 是一个 Channel `$ch1` 的一个 Endpoint, 那么 `$ch1` 会将 `user1` 的消息投递给 ClientID 为 `user1:.*` 的所有 Client。
