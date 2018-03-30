@@ -74,45 +74,130 @@ mode 可以通过 MQTT Broker 的 ACL 功能来实现。
 ### Channel 消息类型
 
 ##### Channel Msg
-即时通信消息。
+即时通信消息。Client 发给 Broker 的消息格式可以自定义，实现 ASSChat 协议的插件或服务需要截获主题 `ch/#` 的所有 PUBLISH 消息，加入附加额外字段之后再进行分发。
 
-Direction: Both `Broker -> Client` and `Client -> Broker`.
-Method: PUBLISH
-Topic: ch/channel-id
-Payload: {"id": msg-id, "body": msg-body, "from": from-client-id}
+Direction: Both `Broker -> Client` and `Client -> Broker`.  
+Method: PUBLISH  
+Topic: ch/{{ChID}}  
+Payload Exmaple:  
+
+`Client -> Broker`:   
+```JSON
+// the format of payload is not defined in ASSChat
+{
+  "msg": "hello?",
+  "ref": "https://example/image.jpeg"
+}
+```
+
+`Broker -> Client`:  
+```JSON
+// Broker will wrap the message in `body` field and then send it to target:
+{"msg_id": 1231,
+ "body": {
+   "msg": "hello?",
+   "ref": "https://example/image.jpeg"
+ },
+ "from": "user1/pc",
+ "timestamp": 1522434238021}
+```
 
 ##### Channel Cmd
-- Create Channel Request   
-  Direction: `Client -> Broker`. Client 发送创建/删除 Channel 请求给服务器。  
+Client 上线时，Broker 会为其自动订阅 `ass/c/{{client-id}}`，以接收 ASSChat 协议消息.
+
+实现 ASSChat 协议的插件或服务需要截获主题 `ass/s/#` 的所有 PUBLISH 消息，然后将回复发布到 `ass/c/{{client-id}}` 主题。
+
+
+- **Create/Update Channel**  
+  **Request:**   
+  Direction: `Client -> Broker`.   
   Method: PUBLISH  
   Topic: ass/s/ch-create  
   Payload Exmaple:  
   ```JSON
-  {"seq_num": 641,
+  {"req_id": "5b18b249bc09",
    "users": [
      {"user_id": "user1", "mode": "rw"},
      {"user_id": "user2", "mode": "w"}
    ],
-   "with_notif": true,
-   "reply_topic": "ass/c/aN8XTQb34t"}
+   "persis": true,
+   "with_notif": true}
   ```
-  `reply_topic` 是登录时随机生成，的格式为: "ass/c/random-generated-id".
-  Client 在每次登录时要主动订阅这个 `reply_topic。`
 
-- Create Channel Response  
-  Direction: `Broker -> Client`. 服务器 发送创建/删除 结果给 Client。  
+  **Response:**  
+  Direction: `Broker -> Client`.   
   Method: PUBLISH  
-  Topic: `reply_topic` of the `Create Channel Request`  
+  Topic:  ass/c/{{client-id}}
   Payload:   
   ```JSON
-  {"seq_num": 642, "rcode": 201, "msg":"channel created", "ch_id": id }
+  {"req_id": "5b18b249bc09", "rcode": 201, "msg":"channel created", "ch_id": "ch/{{ChID}}" }
   ```
 
-- Delete Channel Request
-- Delete Channel Response
+- **Delete Channel**  
+  **Request:**  
+  Direction: `Client -> Broker`.   
+  Method: PUBLISH  
+  Topic: ass/s/ch-delete  
+  Payload Exmaple:  
+  ```JSON
+  {"req_id": "1db236757400", "ch_id": "ch/{{ChID}}", "with_notif": true}
+  ```
+  **Response:**  
+  Direction: `Broker -> Client`.   
+  Method: PUBLISH  
+  Topic:  ass/c/{{client-id}}
+  Payload:   
+  ```JSON
+  {"req_id": "1db236757400", "rcode": 200, "msg":"channel deleted", "ch_id": "ch/{{ChID}}" }
+  ```
 
-- Add Channel Users  
-- Remove Channel Users  
+- **Add/Update Channel Users**  
+  **Request:**  
+  Direction: `Client -> Broker`.  
+  Method: PUBLISH  
+  Topic: ass/s/ch-users-update  
+  Payload Exmaple:  
+  ```JSON
+  { "req_id": "e082938117d1",
+    "ch_id": "ch/{{ChID}}",
+    "users": [
+      {"user_id": "user3", "mode": "rw"}
+    ],
+    "with_notif": true
+  }
+  ```
+  **Response:**  
+  Direction: `Broker -> Client`.  
+  Method: PUBLISH  
+  Topic:  ass/c/{{client-id}}
+  Payload:   
+  ```JSON
+  {"req_id": "e082938117d1", "rcode": 201, "msg":"channel user added", "ch_id": "ch/{{ChID}}" }
+  ```
+
+
+- **Remove Channel Users**   
+  **Request:**  
+  Direction: `Client -> Broker`.  
+  Method: PUBLISH  
+  Topic: ass/s/ch-users-update  
+  Payload Exmaple:  
+  ```JSON
+  { "req_id": "caa2e0e34d69",
+    "ch_id": "ch/{{ChID}}",
+    "users": [
+      "user3", "user1"
+    ],
+    "with_notif": true
+  }
+  ```
+  **Response:**  
+  Direction: `Broker -> Client`.  
+  Method: PUBLISH  
+  Topic:  ass/c/{{client-id}}
+  Payload:   
+  ```JSON
+  {"req_id": "caa2e0e34d69", "rcode": 200, "msg":"channel user deleted", "ch_id": "ch/{{ChID}}" }
 
 - Channel Notification  
   Direction: `Broker -> Client`. Broker 发送 Channel 改动通知给 Client，通知类型可以有如下几种:  
@@ -124,14 +209,13 @@ Payload: {"id": msg-id, "body": msg-body, "from": from-client-id}
 
   Client 收到 Channel Notification 后要回复一个 Channel Cmd ACK。
 
-#### Update Online Status Periodically
+### Online Status
+
+### Push Notifications
+
 
 
 ### 约定
-- ChannelID 命名规范：  
-  CHID 使用 `$` 开头，包含字母、数字、下划线、短线，最大长度 32： `^\$[0-9a-zA-Z_\-]{1,31}$`.  
-  举例：$ch1, $ch-1, $342
-
 - UserID 命名规范：  
   包含字母、数字、下划线、短线、`@`、点。最大长度 32：`^[0-9a-zA-Z_\-@\.]{1,32}$`.  
   举例：Scarlett, 98712, Shawn_123
