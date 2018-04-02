@@ -34,8 +34,14 @@ MQTT 协议里的 `Clean Session` 是在 Client Connect 时设置的，也就是
 - 在 ClientID 的语义基础之上，增加一套命名约定。ClientID 由 UserID 以及扩展字段组成，以实现用户的多终端设备同时登陆。
 
 ## Channel 设计概要
-`Channel` 是 IM 用户聊天的通道，需要有建立、删除 Channel，发送消息到 Channel 等过程。
-通过为 Channel 内的所有 Users 订阅相同的 MQTT Topic 来实现聊天，我们称这个 Topic 为 `Channel Topic`。`Channel Topic` 的订阅和发布都使用 `QoS1`。如果 User 有多个终端的话，我们为他的每个终端都订阅 `Channel Topic`，这样我们就实现了多终端之间的消息同步。
+`Channel` 是 IM 用户聊天的通道，通过为 Channel 内的所有 Users 订阅相同的 MQTT Topic 来实现聊天，我们称这个 Topic 为 `Channel Topic`。
+
+如果 User 有多个终端的话，我们为他的每个终端都订阅 `Channel Topic`，这样我们就实现了多终端之间的消息同步。
+
+订阅 `Channel Topic` 时使用 `No Local` option。
+
+`Channel Topic` 的订阅和发布都使用 `QoS1`。
+
 Channel 内的消息需要持久化，而 Channel 之外的 PUBLISH 消息不持久化。
 
 - 创建 Channel 时，服务器为 Channel 里的所有在线的 Users 订阅 Channel Topic。
